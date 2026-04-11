@@ -106,10 +106,17 @@ proved later as an isolated, optional one-time investment.
 - ✓ Phase 1: SAT, NP, Cook–Levin theorem
 - ✓ Phase 2: Workflow validation via `ThreeSAT.lean` (Three_SAT,
   SAT_NoVar0, variable-shifting reduction)
-- ◯ Phase 3: First batch of standard NP-complete problems
-  (3-SAT splitting reduction, INDEPENDENT-SET, VERTEX-COVER,
-  CLIQUE, 3-COLORING, HAMILTONIAN-CYCLE, SUBSET-SUM, ...)
-- ◯ Phase 4+: Continue adding problems and reductions
+- ◐ Phase 3: First batch of standard NP-complete problems
+  - ✓ `IndependentSet` (definition only — see Phase 3 deferred work)
+  - ✓ `VertexCover` + the IS↔VC duality reduction
+  - ✓ `Clique` + the IS↔CLIQUE complement reduction
+  - **Deferred:** the canonical SAT → IS gadget reduction. The
+    bookkeeping for flat-list positions ↔ (clause, literal-in-clause)
+    pairs is non-trivial and worth a separate focused session. Once
+    in place, NP-hardness of `IS`, `VC`, `CLIQUE` follows by
+    transitivity from the chains `SAT → IS → VC` and `SAT → IS → CLIQUE`.
+- ◯ Phase 4+: 3-SAT splitting reduction, 3-COLORING,
+  HAMILTONIAN-CYCLE, SUBSET-SUM, more graph problems...
 
 ## Per-problem playbook
 

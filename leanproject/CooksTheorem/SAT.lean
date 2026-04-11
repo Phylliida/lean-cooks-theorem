@@ -49,10 +49,25 @@ theorem cook_levin {P : DecisionProblem} (h : NP P) :
     Nonempty (P.Reduces SAT) :=
   h
 
+/-- A decision problem is **NP-hard** iff `SAT` reduces to it.
+By transitivity of `Reduces`, this is equivalent to "every problem
+in NP reduces to it". -/
+def NPHard (P : DecisionProblem) : Prop :=
+  Nonempty (SAT.Reduces P)
+
 /-- A decision problem is **NP-complete** iff it is in NP and every
 problem in NP reduces to it. -/
 def NPComplete (P : DecisionProblem) : Prop :=
   NP P ∧ ∀ Q : DecisionProblem, NP Q → Nonempty (Q.Reduces P)
+
+/-- An NP-hard problem `P` is reduced to by every NP problem `Q`.
+This is the unfolded form of "NP-hardness" and what `NPComplete`
+needs as its second clause. -/
+theorem NPHard.reduces_of_NP {P Q : DecisionProblem}
+    (hP : NPHard P) (hQ : NP Q) : Nonempty (Q.Reduces P) := by
+  obtain ⟨f⟩ := hQ
+  obtain ⟨g⟩ := hP
+  exact ⟨f.trans g⟩
 
 /-- SAT is NP-complete. The "in NP" part is `sat_in_NP`; the
 "every NP problem reduces to it" part is exactly the definition of
