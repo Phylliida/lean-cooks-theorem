@@ -42,6 +42,11 @@ abbrev Satisfies (σ : Nat → Bool) (φ : Formula) : Prop :=
 def Satisfiable (φ : Formula) : Prop :=
   ∃ σ, φ.Satisfies σ
 
+/-- The total literal count of a formula, used as the natural size
+measure for `SAT` as a decision problem. -/
+def size (φ : Formula) : Nat :=
+  (φ.map List.length).sum
+
 end Formula
 
 /-! ### Spike example -/

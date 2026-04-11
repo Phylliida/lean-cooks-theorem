@@ -1,296 +1,164 @@
-# Proof Plan: Cook–Levin Theorem in Lean 4
+# Proof Plan: NP-Completeness Library (formerly Cook–Levin)
 
 ## Goal
 
-Formalize and prove the **Cook–Levin theorem** in Lean 4 + mathlib:
+Build a Lean 4 + mathlib library of **100+ NP-complete decision
+problems** with formally verified Karp reductions between them.
 
-> **SAT is NP-complete.** Equivalently: every language in NP polynomial-time
-> many-one reduces to the Boolean satisfiability problem.
+The seed of the library is `SAT`, with `cook_levin : ∀ L ∈ NP, L
+reduces to SAT`. Every other problem is added by
 
-The full statement we want to land in `CooksTheorem/Main.lean`:
-
-```lean
-theorem cook_levin :
-    ∀ L : Language, L ∈ NP → L ≤ₚ SAT
-```
-
-with `SAT` itself proved to be in `NP` as a corollary, giving NP-completeness.
-
-**Scope, locked in:** end-to-end proof, **zero `sorry` / `axiom` /
-`admit`**, with a proved-poly-time reduction.
+1. defining its `DecisionProblem` (a predicate over a natural type
+   of instances + a size measure),
+2. proving its `NP` membership by exhibiting a Lean function that
+   maps instances to satisfiability-equivalent CNF formulas, and
+3. proving NP-hardness via a chain of Karp reductions back to SAT.
 
 ## Pivot history
 
-The original plan had a Phase 1 building nondeterministic Turing machines
-(`NTM2`, `NTM1`) on top of mathlib's `Turing.TM2`/`TM1`, and a Phase 2
-proving a nondeterministic multi-tape → single-tape simulation
-(`NTM2to1`) with a polynomial overhead bound. That entire body of work
-was estimated at ~1000 lines of intricate `ListBlank`/`Tape` proof
-engineering.
+The original plan tried to formalize Cook–Levin via the standard
+NTM-tableau construction. After several iterations of trying to
+make this work cleanly, we settled on the present architecture
+because the library scale (100+ problems) makes any TM-construction
+approach hopeless.
 
-We pivoted to the **witness-based definition of `NP`**: rather than
-"`L ∈ NP` iff some nondeterministic poly-time TM accepts `L`", we use
-the equivalent "`L ∈ NP` iff some *deterministic* poly-time TM `V`
-and polynomial `p` satisfy `x ∈ L ↔ ∃ w, |w| ≤ p(|x|), V(⟨x, w⟩) = accept`".
-This formulation:
+The key insight was: **define `NP` via SAT-formula reducibility
+instead of NTM-acceptance**. Both definitions are equivalent (this
+*is* the content of Cook–Levin in the classical formulation), but
+the SAT-reducibility version makes the entire framework collapse
+to plain Lean functions over plain Lean types — no Turing machines,
+no DSL, no realizability obligations beyond polynomial size bounds.
 
-- needs only deterministic TMs, so we can use mathlib's `Turing.TM2` /
-  `Turing.FinTM2` directly with no nondeterministic infrastructure;
-- doesn't require us to write any TM-to-TM simulation, since the
-  Cook–Levin tableau encodes both tape contents and witness bits as
-  SAT variables (the witness bits become "free variables" the
-  satisfying assignment picks);
-- is mathematically equivalent to the NTM-based definition (standard
-  textbook result);
-- collapses the original Phase 1 + Phase 2 into a single small phase.
+## Architecture
 
-The deleted files (`CooksTheorem/TM/NTM2.lean`, `NTM1.lean`, `StepN.lean`,
-`Accepts.lean`, `Example.lean`, `Sim/Notes.md`) live in commit history.
+### Core types (Phase 0)
 
-## Why This Is Still Hard
+**`CooksTheorem/CNF.lean`** — `Literal`, `Formula = List (List Literal)`,
+`eval`, `Satisfies`, `Satisfiable`, `size`. ~50 lines.
 
-Even after the pivot, this is one of the larger formalizations one
-can attempt in complexity theory:
+**`CooksTheorem/Complexity.lean`** — `DecisionProblem` (a record of
+`α`, `pred`, `size`), `Reduces P₁ P₂` (a record of `fn`, `correct`,
+polynomial `bound`, `bound_holds`), plus `Reduces.refl`,
+`Reduces.trans`, and the small lemma `Polynomial.eval_le_eval_of_le`
+needed by `trans`. ~90 lines.
 
-1. **No off-the-shelf complexity classes.** Mathlib has Turing
-   machines and bundled `FinTM2`/`TM2OutputsInTime` for *function
-   computation*, but not `P`, not `NP`, not propositional SAT, not
-   the Cook–Levin tableau. We build all of it.
-2. **The tableau encoding is bookkeeping-heavy.** The standard proof
-   builds a 2D table of cells, defines O(n²) Boolean variables, and
-   writes O(n²) clauses across four constraint families. Each
-   constraint family requires its own correctness lemma. Plenty of
-   off-by-one and indexing risk.
-3. **The reduction must itself be poly-time computable.** It's not
-   enough to *define* the formula; we need a function that constructs
-   it whose runtime is bounded by a polynomial in `|x|`. That means
-   building a second time-bound proof on the reduction itself.
-4. **Mathlib's `FinTM2` is multi-stack, not single-tape.** The
-   tableau is most cleanly built on a single-tape machine, which
-   means we either build the tableau over multi-stack configurations
-   (more complex constraints) or invoke mathlib's `Turing.TM2to1`
-   construction and prove it polynomial. We'll cross that bridge
-   when we get to it.
+**`CooksTheorem/SAT.lean`** — `SAT : DecisionProblem`,
+`NP : DecisionProblem → Prop := fun P => Nonempty (P.Reduces SAT)`,
+`sat_in_NP`, `cook_levin`, `NPComplete`, `sat_npComplete`. The
+"hard" theorems are essentially definitional under our framing. ~60 lines.
 
-## What Mathlib Gives Us
+### Per-problem files
 
-**Have:**
-- `Mathlib.Computability.TuringMachine` — `Turing.TM0`, `TM1`, `TM2`
-  models, plus the deterministic `Turing.TM2to1` simulation (with
-  evaluation correctness, no time bound).
-- `Mathlib.Computability.TMComputable` — `FinTM2` (bundled
-  finite-state TM2), `EvalsTo` / `EvalsToInTime` (step-counted
-  iteration), `TM2OutputsInTime`, `TM2ComputableInPolyTime` for
-  function computation.
-- `Mathlib.Computability.Encoding` — `Encoding`, `FinEncoding`
-  infrastructure, encoders for `Bool`, `Nat`, etc.
-- `Mathlib.Computability.Language` — `Language α := Set (List α)`.
-- General-purpose tools: `Polynomial`, `Finset`, `Decidable`,
-  `Fintype`.
+For each NP-complete problem `L_i`, one file at
+`CooksTheorem/Problems/L_i.lean` (or grouped by topic) containing:
 
-**Don't have (we will build):**
-- A propositional-logic AST and a `Satisfiable` predicate.
-  *(Phase 0, done.)*
-- An acceptance predicate for `FinTM2` that doesn't impose mathlib's
-  restrictive output convention. *(Phase 1, done.)*
-- A bundled poly-time decider, `P`, and `NP`. *(Phase 1, done.)*
-- The SAT language and a verifier proving `SAT ∈ NP`. *(Phase 2.)*
-- The Cook–Levin tableau construction. *(Phase 3.)*
-- The final assembly. *(Phase 4.)*
+- The instance type (often a subtype of `CNF.Formula` or a custom
+  record like `Graph × Nat`)
+- The `DecisionProblem` definition
+- An `NP` proof (a `Reduces L_i SAT` with a Lean function producing
+  the equivalent CNF)
+- An NP-hardness proof (a `Reduces L_j L_i` from some already-defined
+  NP-complete `L_j`)
 
-## Locked Design Decisions
+Validation file `CooksTheorem/ThreeSAT.lean` contains the first two
+non-trivial examples:
 
-### D1. Computational model
+- `Three_SAT` (CNF with all clauses ≤ 3 literals; subtype α)
+- A trivial reduction `Three_SAT.Reduces SAT`
+- `SAT_NoVar0` (CNF avoiding variable index 0; subtype α)
+- A non-trivial reduction `SAT.Reduces SAT_NoVar0` via variable
+  shifting, with a real correctness proof (assignment
+  transformation + structural induction over the formula
+  representation)
 
-Use mathlib's `Turing.FinTM2` (bundled deterministic multi-stack
-TM with `Fintype`/`DecidableEq` on `K`/`Λ`/`σ`) as the underlying
-machine.
+The variable-shifting example came in at ~135 lines including
+docstrings, which is comfortably within budget for ~100-line per
+problem.
 
-### D2. Acceptance predicate
+## What we're (not) verifying
 
-We do **not** use mathlib's `TM2OutputsInTime`, which is designed
-for function computation and forces the TM to leave `var` at
-`initialState` and clean up all non-output stacks before halting.
-Instead our `AcceptsIn tm acceptLabel x t` says:
+We verify, for every reduction:
 
-> Some configuration on the trace of `tm` from input `x` within the
-> first `t` steps has label `some acceptLabel`.
+- **Correctness** of the biconditional `x ∈ L₁ ↔ fn x ∈ L₂` (a real
+  Lean proof obligation)
+- **Polynomial size bound** on the output: `(fn x).size ≤ p.eval (input.size)`
+  for an explicit polynomial `p`
+- **Lean termination** of the reduction function (automatic via
+  Lean's structural recursion checking)
 
-This is much friendlier to writing verifiers that just want to
-"jump to accept and stop caring".
+We do **not** explicitly verify polynomial-time *evaluation* of the
+reduction function. The output-size bound is the meaningful Karp
+reduction obligation; "obviously poly-time computable in Lean" is
+left as a conventional reading of the function's structure (this is
+how every textbook reduction is presented). For the planned use case
+(a teaching/reference library), this trade-off is appropriate. We
+sacrifice formal time-bound verification to gain the ability to
+write 100+ reductions in plain Lean.
 
-### D3. Witness-based NP
-
-```lean
-def NP : Set Language :=
-  { L | ∃ (V : Decider) (witnessLen : Polynomial ℕ),
-      ∀ x, x ∈ L ↔ ∃ w : List Bool,
-        w.length ≤ witnessLen.eval x.length ∧
-        V.Accepts (encodePair x w) }
-```
-
-`encodePair x w := unary(|x|) ++ false :: x ++ w` — length-prefix
-encoding so `(x, w)` can be recovered.
-
-### D4. Formula representation
-
-Define a general inductive `PropFormula` *and* a CNF representation
-when Phase 3 needs it. The Cook–Levin construction natively
-produces CNF, so we'll define both with an equisatisfiability
-lemma.
-
-### D5. Poly-time reductions: abstract definition + concrete witnesses
-
-`P` / `NP` definitions use existential polynomial bounds. Every
-*instance* (the SAT verifier, the Cook–Levin reduction itself)
-exposes its concrete polynomial witness as part of its statement.
-
-### D6. Alphabet
-
-Input alphabet is `Bool`. The TM's tape alphabets can be richer;
-the `Decider` carries an `Equiv` between its input stack alphabet
-and `Bool` so callers always work with `List Bool`.
-
-## Phases
-
-Each phase ends in a verified Lean module that compiles standalone.
-Commit at every phase boundary so we can always back up.
-
-### Phase 0 — Propositional logic foundations ✓ DONE
-
-`CooksTheorem/PropLogic/Formula.lean`: `PropFormula`, `eval`,
-`Satisfies`, `Satisfiable`, two `decide`-checked examples. About
-55 lines.
-
-We'll add `CooksTheorem/PropLogic/CNF.lean` (Literal / Clause /
-CNF / equisat lemma) at the start of Phase 3, when the tableau
-needs it.
-
-### Phase 1 — Complexity classes ✓ DONE
-
-`CooksTheorem/Complexity.lean`: `Language`, `encodePair` with a
-length lemma, `AcceptsIn`, `Decider`, `P`, `NP`. About 100 lines.
-
-### Phase 2 — SAT ∈ NP
-
-**Deliverables:**
-- `CooksTheorem/SAT/Encoding.lean` — encoding of `PropFormula`
-  as `List Bool` and a decoder, plus `decode_encode` round-trip.
-- `CooksTheorem/SAT/Defs.lean` — the SAT language as a `Language`.
-- `CooksTheorem/SAT/Verifier.lean` — a concrete `FinTM2` that
-  reads an encoded formula plus an encoded assignment from its
-  input stack, evaluates the formula on the assignment, and
-  jumps to its accept label iff the result is `true`.
-- `CooksTheorem/SAT/InNP.lean` — `theorem sat_in_NP : SAT ∈ NP`.
-  The witness is the assignment.
-
-The verifier's correctness proof is the bulk of the work for this
-phase. Time bound: linear in the encoded input length.
-
-**Exit criterion:** `theorem sat_in_NP : SAT ∈ NP` typechecks
-sorry-free, and `#print axioms sat_in_NP` shows only Lean core
-axioms.
-
-### Phase 3 — The Cook–Levin tableau
-
-This is the bulk of the formalization. Split into substeps that
-each end at a checkpoint.
-
-**3a. CNF infrastructure.**
-- `CooksTheorem/PropLogic/CNF.lean` — `Literal`, `Clause`, `CNF`,
-  satisfaction, conversion to `PropFormula` and equisat lemma.
-
-**3b. Tableau data structure.**
-- `CooksTheorem/CookLevin/Tableau.lean` — indexing, cell contents,
-  variable indexing function `var : ℕ → ℕ → CellContent → ℕ`.
-  Decision: do we build the tableau on a single-tape machine
-  (requires `Turing.TM2to1`-style preprocessing of the verifier
-  and a polynomial-time bound on it), or on the multi-stack
-  `FinTM2` directly (more complex constraints)? Resolve at the
-  start of 3b.
-
-**3c. Constraint families.**
-- `.../Constraints/Cell.lean` — exactly-one cell content.
-- `.../Constraints/Start.lean` — initial-row constraints
-  (encodes both input and the witness's free bits).
-- `.../Constraints/Accept.lean` — some cell contains the accept
-  label.
-- `.../Constraints/Move.lean` — every 2×3 window (or its
-  multi-stack analogue) is consistent. **The trickiest constraint**
-  because the set of "valid windows" is enumerated from the TM's
-  transition relation. Prototype on a 2-state, 2-symbol toy TM
-  before writing the general version.
-
-**3d. The big formula.**
-- `CooksTheorem/CookLevin/Reduction.lean`:
-  ```lean
-  def cookLevinFormula (V : Decider) (witnessLen : Polynomial ℕ)
-    (x : List Bool) : CNF
-  ```
-- Polynomial size bound on the formula
-  (`O((V.time(2|x|+1+witnessLen|x|)² + ...))` clauses).
-
-**3e. Reduction soundness and completeness.**
-- `theorem cookLevin_complete : (∃ w, V.Accepts (encodePair x w)) → (cookLevinFormula V wL x).Sat`
-- `theorem cookLevin_sound : (cookLevinFormula V wL x).Sat → (∃ w, V.Accepts (encodePair x w))`
-
-Both are structural inductions on the tableau. The "sound"
-direction is the harder one.
-
-**3f. Reduction is poly-time.** *Mandatory, no sorry.*
-- A function `buildFormula` with an explicit poly-time bound
-  proved by structural recursion on the construction.
-
-**Exit criterion:** all of `cookLevinFormula`, `cookLevin_complete`,
-`cookLevin_sound`, and the time bound on `buildFormula` are
-sorry-free.
-
-### Phase 4 — Cook–Levin
-
-**Deliverables:**
-- `CooksTheorem/Main.lean`:
-  ```lean
-  theorem cook_levin (L : Language) (hL : L ∈ NP) : L ≤ₚ SAT
-  theorem sat_npComplete : NPComplete SAT
-  ```
-  The `cook_levin` proof is "unpack `hL` to get the verifier `V`
-  and witness-length `p`; hand both to `cookLevinFormula`; cite
-  Phase 3's correctness and time-bound lemmas; done."
-
-**Exit criterion:** `theorem cook_levin` at the top of this plan
-compiles with no `sorry`, no `axiom`, no `admit`. Run
-`#print axioms cook_levin` and verify it depends only on Lean's
-core axioms.
-
-## Risks and Where We Might Get Stuck
-
-1. **Tableau over multi-stack vs single-tape.** Building the
-   tableau over `FinTM2`'s multi-stack configuration is novel
-   territory; building over a single-tape machine requires us to
-   either restrict to TM1-like deciders (forcing a one-stack
-   `FinTM2`) or invoke and prove polynomial bounds on
-   `Turing.TM2to1`. *Mitigation:* in Phase 3a, prototype on a
-   one-stack `Decider` first to keep the tableau 2D.
-2. **The `Move` constraint.** Enumerating valid 2×3 windows
-   generates a lot of cases; the soundness lemma is the single
-   biggest proof-engineering risk. *Mitigation:* prototype on a
-   2-state, 2-symbol toy `Decider` in 3c before writing the
-   general version.
-3. **Polynomial composition.** Several places need to compose
-   polynomials (verifier runtime composed with reduction runtime).
-   Mathlib's `Polynomial` API is heavy; consider a thin
-   `IsPolyBound : (ℕ → ℕ) → Prop` wrapper that says "bounded by
-   *some* polynomial," which composes more cleanly than carrying
-   `Polynomial ℕ` witnesses everywhere.
-4. **Rebuild times.** Mathlib v4.25.0 is large; expect cold
-   rebuilds to be slow. Use `lake exe cache get` after every dep
-   change and keep modules small so re-elaboration on edit is
-   fast.
+The equivalence between this SAT-reducibility-based `NP` and the
+standard NTM-based `NP` is folklore (Cook–Levin in its original
+direction). If anyone wants the equivalence theorem, it can be
+proved later as an isolated, optional one-time investment.
 
 ## Status
 
-- Phase 0: ✓ complete (`PropLogic/Formula.lean`)
-- Phase 1: ✓ complete (`Complexity.lean`)
-- Phase 2: not started (next)
-- Phase 3: not started
-- Phase 4: not started
+- ✓ Phase 0: Core types (`CNF`, `Complexity`)
+- ✓ Phase 1: SAT, NP, Cook–Levin theorem
+- ✓ Phase 2: Workflow validation via `ThreeSAT.lean` (Three_SAT,
+  SAT_NoVar0, variable-shifting reduction)
+- ◯ Phase 3: First batch of standard NP-complete problems
+  (3-SAT splitting reduction, INDEPENDENT-SET, VERTEX-COVER,
+  CLIQUE, 3-COLORING, HAMILTONIAN-CYCLE, SUBSET-SUM, ...)
+- ◯ Phase 4+: Continue adding problems and reductions
+
+## Per-problem playbook
+
+For an NP-complete problem `L`:
+
+1. **Define the instance type.** Use a subtype of an existing type
+   when possible; otherwise define a small `structure`.
+2. **Define the `DecisionProblem`.** Three fields: `α`, `pred`, `size`.
+3. **Define the size measure.** Should be the natural complexity-theory
+   notion (number of vertices for graph problems, number of literals
+   for SAT-like problems, etc.).
+4. **Prove `NP` membership** by writing a Lean function from `L.α`
+   to `CNF.Formula` whose output is satisfiable iff the predicate
+   holds, and bounding its output size by a polynomial. Package as a
+   `Reduces L SAT`.
+5. **Prove NP-hardness** by writing a Lean function from some
+   already-defined NP-complete problem's instance type to `L.α`,
+   with the analogous correctness biconditional and size bound.
+   Package as a `Reduces (existing) L`.
+6. **Optional:** prove additional reductions to/from `L` for
+   convenience.
+
+Per-problem budget under this playbook: **~100 lines**, dominated
+by the correctness proofs of the reductions.
+
+## Risks
+
+1. **Proof noise on the eval lemmas.** The variable-shifting
+   reduction's `shiftFormula_eval` proof requires ~10 lines of
+   `List.all_map` / `List.any_map` / `congr` / `funext` plumbing.
+   For many similar reductions, we may want to extract a small
+   tactic or set of helper lemmas. *Mitigation:* deal with this
+   when it actually becomes painful (after the first 5–10 problems).
+2. **Subtype manipulation friction.** Working with subtype-α
+   problems requires `Subtype.val` unwrapping in places. So far this
+   is manageable. *Mitigation:* if it becomes annoying, define
+   helper definitions on the subtype directly.
+3. **Polynomial composition is `noncomputable`.** Mathlib's
+   `Polynomial.X` and `Polynomial.comp` are noncomputable, so all
+   our `Reduces` constructors are `noncomputable`. This is fine
+   (`#print axioms` confirms only Lean core axioms are used). If
+   computability ever becomes a concern, swap to a `Nat → Nat`
+   bound predicate.
+
+## First concrete next step
+
+Pick a real NP-complete problem with a different instance type
+(suggestion: **INDEPENDENT-SET** with a graph type) and complete
+the per-problem playbook end-to-end. This stress-tests the
+framework on a non-CNF instance type and gives us our first
+"real" Karp reduction (the standard 3-SAT → INDEPENDENT-SET gadget
+construction).

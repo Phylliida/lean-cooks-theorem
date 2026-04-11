@@ -1,115 +1,90 @@
-import Mathlib.Computability.TMComputable
 import Mathlib.Algebra.Polynomial.Eval.Defs
+import Mathlib.Algebra.Polynomial.Basic
 
 /-!
-# Languages and the complexity classes P and NP
+# Decision problems and polynomial-size many-one reductions
 
-We use mathlib's bundled `Turing.FinTM2` (deterministic multi-stack
-TM with finiteness conditions) as the underlying machine model. On
-top of it we define our own minimal acceptance predicate
-`AcceptsIn` (configuration-trace passes through a designated accept
-label within `t` steps), then bundle it into a `Decider` carrying
-a polynomial time bound.
+A `DecisionProblem` is a predicate over an arbitrary type of instances,
+paired with a "natural size" function. A `Reduces P₁ P₂` is a function
+on instances together with a polynomial bound on the output size and
+a correctness biconditional.
 
-The witness-based definition of `NP` is then:
-> `L ∈ NP` iff some `Decider` accepts the encoded pair `⟨x, w⟩`
-> for some witness `w` of polynomially-bounded length.
+We deliberately do **not** require the reduction function to be
+formally polynomial-time computable. Polynomial-*size* on the output
+is the meaningful obligation for Karp reductions: the formal
+verification we get is that the reduced instance is polynomially
+sized, the biconditional holds, and the reduction is a total Lean
+function (so by structural-recursion termination it is at least
+computable). In practice every reduction we'll write is "obviously
+poly-time" by inspection.
+
+This avoids hand-coding Turing machines for every verifier and
+reduction in the planned NP-completeness library.
 -/
 
-namespace CooksTheorem.Complexity
+open Polynomial
 
-open Turing
+namespace CooksTheorem
 
-/-- A language is a set of binary strings. -/
-abbrev Language := Set (List Bool)
+/-- A decision problem: a predicate over a natural type of instances,
+plus a "natural size" measure used to bound polynomial reductions. -/
+structure DecisionProblem where
+  /-- The natural type of instances. -/
+  α : Type
+  /-- The predicate defining membership in the language. -/
+  pred : α → Prop
+  /-- The natural size of an instance. -/
+  size : α → Nat
 
-/-! ### Pair encoding
+namespace DecisionProblem
 
-Length-prefix encoding: `unary(|x|) ++ [false] ++ x ++ w`, so the
-length of `x` can be read off the prefix and the rest of the list
-splits cleanly into `x` and `w`. -/
+/-- Polynomial-size many-one reduction from `P₁` to `P₂`. -/
+structure Reduces (P₁ P₂ : DecisionProblem) where
+  /-- The reduction function on instances. -/
+  fn : P₁.α → P₂.α
+  /-- Correctness: `x` satisfies `P₁` iff `fn x` satisfies `P₂`. -/
+  correct : ∀ x, P₁.pred x ↔ P₂.pred (fn x)
+  /-- A polynomial bounding the output size. -/
+  bound : Polynomial ℕ
+  /-- The output size is bounded by the polynomial applied to the input size. -/
+  bound_holds : ∀ x, P₂.size (fn x) ≤ bound.eval (P₁.size x)
 
-/-- `encodePair x w = (true repeated |x| times) ++ false :: x ++ w`. -/
-def encodePair (x w : List Bool) : List Bool :=
-  List.replicate x.length true ++ false :: (x ++ w)
+end DecisionProblem
 
-@[simp]
-theorem encodePair_length (x w : List Bool) :
-    (encodePair x w).length = 2 * x.length + 1 + w.length := by
-  simp [encodePair, two_mul, List.length_append]
-  omega
+/-- Polynomial evaluation over `ℕ` is monotone in the input. The proof is
+by induction on the polynomial: monomial and addition cases each preserve
+the inequality. Used by `Reduces.trans` to compose reductions. -/
+theorem _root_.Polynomial.eval_le_eval_of_le (p : Polynomial ℕ) {a b : ℕ}
+    (h : a ≤ b) : p.eval a ≤ p.eval b := by
+  induction p using Polynomial.induction_on' with
+  | add p q hp hq =>
+    simp only [eval_add]
+    exact Nat.add_le_add hp hq
+  | monomial n c =>
+    simp only [eval_monomial]
+    exact Nat.mul_le_mul_left c (Nat.pow_le_pow_left h n)
 
-/-! ### Acceptance predicate -/
+namespace DecisionProblem.Reduces
 
-/-- The starting label of a `FinTM2` is its `main` field. -/
-@[simp]
-theorem initList_l (tm : FinTM2) (x : List (tm.Γ tm.k₀)) :
-    (initList tm x).l = some tm.main := rfl
+/-- Identity reduction: every problem reduces to itself. -/
+noncomputable def refl (P : DecisionProblem) : Reduces P P where
+  fn := id
+  correct _ := Iff.rfl
+  bound := X
+  bound_holds _ := by simp
 
-/-- `AcceptsIn tm acceptLabel x t` says: starting from the initial
-configuration of `tm` on input `x`, some configuration on the trace
-within the first `t` steps has label `some acceptLabel`. -/
-def AcceptsIn (tm : FinTM2) (acceptLabel : tm.Λ)
-    (x : List (tm.Γ tm.k₀)) (t : ℕ) : Prop :=
-  ∃ s ≤ t, ∃ c : tm.Cfg,
-    (flip bind tm.step)^[s] (some (initList tm x)) = some c ∧
-    c.l = some acceptLabel
+/-- Composition of reductions. -/
+noncomputable def trans {P₁ P₂ P₃ : DecisionProblem}
+    (f : Reduces P₁ P₂) (g : Reduces P₂ P₃) : Reduces P₁ P₃ where
+  fn := g.fn ∘ f.fn
+  correct x := (f.correct x).trans (g.correct (f.fn x))
+  bound := g.bound.comp f.bound
+  bound_holds x := by
+    have h₁ := f.bound_holds x
+    have h₂ := g.bound_holds (f.fn x)
+    rw [eval_comp]
+    exact h₂.trans (g.bound.eval_le_eval_of_le h₁)
 
-/-- `AcceptsIn` is monotone in the time bound: if a machine accepts
-within `t` steps, it accepts within any `t' ≥ t`. -/
-theorem AcceptsIn.mono {tm : FinTM2} {acceptLabel : tm.Λ}
-    {x : List (tm.Γ tm.k₀)} {t t' : ℕ} (htt' : t ≤ t') :
-    AcceptsIn tm acceptLabel x t → AcceptsIn tm acceptLabel x t' := by
-  rintro ⟨s, hs, c, hc, hl⟩
-  exact ⟨s, hs.trans htt', c, hc, hl⟩
+end DecisionProblem.Reduces
 
-/-! ### Polynomial-time deciders -/
-
-/-- A polynomial-time decision verifier for languages over `Bool`.
-Bundles a `FinTM2`, the equivalence between its input alphabet
-and `Bool`, a designated accept label, and a polynomial time
-bound. -/
-structure Decider where
-  /-- The underlying bundled deterministic TM. -/
-  tm : FinTM2
-  /-- The TM's input alphabet is equivalent to `Bool`. -/
-  inputEquiv : tm.Γ tm.k₀ ≃ Bool
-  /-- Designated accept label. -/
-  acceptLabel : tm.Λ
-  /-- Polynomial bound on the number of steps. -/
-  time : Polynomial ℕ
-
-namespace Decider
-
-variable (V : Decider)
-
-/-- Encode a `List Bool` input into the TM's native input alphabet. -/
-def encodeInput (x : List Bool) : List (V.tm.Γ V.tm.k₀) :=
-  x.map V.inputEquiv.symm
-
-/-- `V` accepts the boolean input `x`: the trace from `x`'s encoded
-initial configuration passes through `V.acceptLabel` within
-`V.time.eval x.length` steps. -/
-def Accepts (x : List Bool) : Prop :=
-  AcceptsIn V.tm V.acceptLabel (V.encodeInput x) (V.time.eval x.length)
-
-end Decider
-
-/-! ### The classes P and NP -/
-
-/-- The complexity class P: languages decidable in polynomial time. -/
-def P : Set Language :=
-  { L | ∃ V : Decider, ∀ x, x ∈ L ↔ V.Accepts x }
-
-/-- The complexity class NP, witness-based formulation: a language
-`L` is in `NP` iff there is a polynomial-time `Decider V` and a
-polynomial witness-length bound `witnessLen` such that `x ∈ L`
-exactly when some witness `w` of length `≤ witnessLen(|x|)` makes
-`V` accept the encoded pair `⟨x, w⟩`. -/
-def NP : Set Language :=
-  { L | ∃ (V : Decider) (witnessLen : Polynomial ℕ),
-      ∀ x, x ∈ L ↔ ∃ w : List Bool,
-        w.length ≤ witnessLen.eval x.length ∧
-        V.Accepts (encodePair x w) }
-
-end CooksTheorem.Complexity
+end CooksTheorem
