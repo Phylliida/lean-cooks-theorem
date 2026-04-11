@@ -41,6 +41,11 @@ theorem encodePair_length (x w : List Bool) :
 
 /-! ### Acceptance predicate -/
 
+/-- The starting label of a `FinTM2` is its `main` field. -/
+@[simp]
+theorem initList_l (tm : FinTM2) (x : List (tm.Γ tm.k₀)) :
+    (initList tm x).l = some tm.main := rfl
+
 /-- `AcceptsIn tm acceptLabel x t` says: starting from the initial
 configuration of `tm` on input `x`, some configuration on the trace
 within the first `t` steps has label `some acceptLabel`. -/
@@ -49,6 +54,14 @@ def AcceptsIn (tm : FinTM2) (acceptLabel : tm.Λ)
   ∃ s ≤ t, ∃ c : tm.Cfg,
     (flip bind tm.step)^[s] (some (initList tm x)) = some c ∧
     c.l = some acceptLabel
+
+/-- `AcceptsIn` is monotone in the time bound: if a machine accepts
+within `t` steps, it accepts within any `t' ≥ t`. -/
+theorem AcceptsIn.mono {tm : FinTM2} {acceptLabel : tm.Λ}
+    {x : List (tm.Γ tm.k₀)} {t t' : ℕ} (htt' : t ≤ t') :
+    AcceptsIn tm acceptLabel x t → AcceptsIn tm acceptLabel x t' := by
+  rintro ⟨s, hs, c, hc, hl⟩
+  exact ⟨s, hs.trans htt', c, hc, hl⟩
 
 /-! ### Polynomial-time deciders -/
 

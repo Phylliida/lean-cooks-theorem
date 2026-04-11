@@ -1,2 +1,2 @@
-import CooksTheorem.PropLogic.Formula
+import CooksTheorem.CNF
 import CooksTheorem.Complexity
