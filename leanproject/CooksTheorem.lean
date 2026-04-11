@@ -1,0 +1,1 @@
+import CooksTheorem.PropLogic.Formula

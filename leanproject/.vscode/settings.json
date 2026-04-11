@@ -1,0 +1,5 @@
+{
+  "lean4.envPathExtensions": [
+    "/home/bepis/.elan/toolchains/leanprover--lean4---v4.30.0-rc1/bin"
+  ]
+}
