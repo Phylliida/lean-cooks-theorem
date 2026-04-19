@@ -1,3 +1,5 @@
+--Good!
+
 /-!
 # Conjunctive normal form
 

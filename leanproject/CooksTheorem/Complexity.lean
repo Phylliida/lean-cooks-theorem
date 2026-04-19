@@ -1,6 +1,6 @@
 import Mathlib.Algebra.Polynomial.Eval.Defs
 import Mathlib.Algebra.Polynomial.Basic
-
+--Good!
 /-!
 # Decision problems and polynomial-size many-one reductions
 
@@ -54,7 +54,7 @@ end DecisionProblem
 /-- Polynomial evaluation over `ℕ` is monotone in the input. The proof is
 by induction on the polynomial: monomial and addition cases each preserve
 the inequality. Used by `Reduces.trans` to compose reductions. -/
-theorem _root_.Polynomial.eval_le_eval_of_le (p : Polynomial ℕ) {a b : ℕ}
+theorem nat_poly_eval_le_eval_of_le (p : Polynomial ℕ) {a b : ℕ}
     (h : a ≤ b) : p.eval a ≤ p.eval b := by
   induction p using Polynomial.induction_on' with
   | add p q hp hq =>
@@ -83,7 +83,7 @@ noncomputable def trans {P₁ P₂ P₃ : DecisionProblem}
     have h₁ := f.bound_holds x
     have h₂ := g.bound_holds (f.fn x)
     rw [eval_comp]
-    exact h₂.trans (g.bound.eval_le_eval_of_le h₁)
+    exact h₂.trans (nat_poly_eval_le_eval_of_le g.bound h₁)
 
 end DecisionProblem.Reduces
 
